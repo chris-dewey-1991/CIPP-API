@@ -18,21 +18,13 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
             Intune Standards
         TAG
             Intune Standards
-        ADDEDCOMPONENT
-            {"type":"autoComplete","multiple":false,"label":"Defender Intune connection state","name":"standards.DefenderIntuneConnection.DesiredState","options":[{"label":"Enabled","value":"Enabled"},{"label":"Disabled","value":"Disabled"}]}
-        ADDEDCOMPONENT
-            {"type":"autoComplete","multiple":false,"label":"Remediate","name":"standards.DefenderIntuneConnection.remediate","options":[{"label":"Yes","value":"true"},{"label":"No","value":"false"}]}
-        ADDEDCOMPONENT
-            {"type":"autoComplete","multiple":false,"label":"Alert on non‑compliance","name":"standards.DefenderIntuneConnection.alert","options":[{"label":"Yes","value":"true"},{"label":"No","value":"false"}]}
-        ADDEDCOMPONENT
-            {"type":"autoComplete","multiple":false,"label":"Include in report","name":"standards.DefenderIntuneConnection.report","options":[{"label":"Yes","value":"true"},{"label":"No","value":"false"}]}
 
         IMPACT
             Low Impact
         ADDEDDATE
             2026-03-01
         POWERSHELLEQUIVALENT
-            # TODO: document your underlying Get/Set Defender–Intune connection implementation
+            # TODO: document your underlying Get/Set Defender-Intune connection implementation
         RECOMMENDEDBY
             YOURNAME
         UPDATECOMMENTBLOCK
@@ -40,8 +32,9 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
     .LINK
         https://docs.cipp.app/user-documentation/tenant/standards/list-standards
     #>
-     param ($Tenant, $Settings)
+    param ($Tenant, $Settings)
 
+    # License check
     $TestResult = Test-CIPPStandardLicense -StandardName 'DefenderIntuneConnection' -TenantFilter $Tenant -RequiredCapabilities @(
         'EXCHANGE_S_STANDARD',
         'EXCHANGE_S_ENTERPRISE',
@@ -49,18 +42,21 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
         'EXCHANGE_S_ENTERPRISE_GOV',
         'EXCHANGE_LITE'
     )
-    if ($TestResult -eq $false) { return $true }
+    if ($TestResult -eq $false) {
+        return $true
+    }
 
     # No per-standard field – we just always want Enabled
     $DesiredState = 'Enabled'
 
-    # Optional: global framework still sets Settings.remediate / alert / report
+    # Framework still passes these based on the global toggle and standard config
     $DoRemediate = $Settings.remediate -eq $true
     $DoAlert     = $Settings.alert -eq $true
     $DoReport    = $Settings.report -eq $true
 
+    # Get current state (placeholder – replace with real check)
     try {
-        # TODO: implement real logic
+        # TODO: implement real logic, e.g.:
         # $CurrentState = Get-CIPPDefenderIntuneConnectionState -Tenant $Tenant  # "Enabled"/"Disabled"
         $CurrentState = 'Disabled'  # placeholder
     }
@@ -70,10 +66,15 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
         return
     }
 
+    # Remediation
     if ($DoRemediate) {
         if ($CurrentState -ne $DesiredState) {
             try {
-                # if ($DesiredState -eq 'Enabled') { Enable-CIPPDefenderIntuneConnection -Tenant $Tenant }
+                # TODO: implement real remediation, e.g.:
+                # if ($DesiredState -eq 'Enabled') {
+                #     Enable-CIPPDefenderIntuneConnection -Tenant $Tenant
+                # }
+
                 Write-LogMessage -API 'Standards' -Tenant $Tenant -message "Set DefenderIntuneConnection to $DesiredState" -sev Info
             }
             catch {
@@ -81,18 +82,28 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
                 Write-LogMessage -API 'Standards' -tenant $Tenant -message "Failed to set DefenderIntuneConnection. Error: $($ErrorMessage.NormalizedError)" -Sev Error -LogData $ErrorMessage
             }
         }
-    }
-
-    if ($DoAlert) {
-        if ($CurrentState -ne $DesiredState) {
-            Write-StandardsAlert -message "DefenderIntuneConnection is not $DesiredState" -object $CurrentState -tenant $Tenant -standardName 'DefenderIntuneConnection' -standardId $Settings.standardId
+        else {
+            Write-LogMessage -API 'Standards' -Tenant $Tenant -message "DefenderIntuneConnection already in desired state ($DesiredState)" -sev Info
         }
     }
 
+    # Alerting
+    if ($DoAlert) {
+        if ($CurrentState -ne $DesiredState) {
+            Write-StandardsAlert -message "DefenderIntuneConnection is not $DesiredState" -object $CurrentState -tenant $Tenant -standardName 'DefenderIntuneConnection' -standardId $Settings.standardId
+            Write-LogMessage -API 'Standards' -Tenant $Tenant -message "DefenderIntuneConnection is not $DesiredState" -sev Info
+        }
+        else {
+            Write-LogMessage -API 'Standards' -Tenant $Tenant -message "DefenderIntuneConnection is $DesiredState" -sev Info
+        }
+    }
+
+    # Reporting
     if ($DoReport) {
         $CurrentValue  = @{ DefenderIntuneConnection = $CurrentState }
         $ExpectedValue = @{ DefenderIntuneConnection = $DesiredState }
+
         Set-CIPPStandardsCompareField -FieldName 'standards.DefenderIntuneConnection' -CurrentValue $CurrentValue -ExpectedValue $ExpectedValue -TenantFilter $Tenant
-        Add-CIPPBPField -FieldName 'DefenderIntuneConnectionSet' -FieldValue ([string]$CurrentState) -StoreAs string -Tenant $Tenant
+        Add-CIPPBPAField -FieldName 'DefenderIntuneConnectionSet' -FieldValue ([string]$CurrentState) -StoreAs string -Tenant $Tenant
     }
 }
