@@ -7,9 +7,8 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
     .SYNOPSIS
         (Label) Ensure Microsoft Defender Intune connection is enabled
     .DESCRIPTION
-        (Helptext) Ensures that the Microsoft Defender for Endpoint–Intune connection is enabled for the tenant.
-        Requires Microsoft Defender for Endpoint Plan 1 or Plan 2 and the WindowsDefenderATP API permission
-        on the CIPP app registration.
+        (Helptext) Ensures that the Microsoft Defender for Endpoint-Intune connection is enabled for the tenant.
+        Requires Microsoft Defender for Endpoint Plan 1 or Plan 2. Tenants without MDE will be skipped silently.
 
         (DocsDescription) Enables the Microsoft Intune connection toggle in Defender for Endpoint
         (Settings > Endpoints > General > Advanced features > Microsoft Intune connection).
@@ -20,7 +19,7 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
         TAG
             "CIS"
         EXECUTIVETEXT
-            Ensures the Microsoft Defender for Endpoint–Intune connection is enabled so that device
+            Ensures the Microsoft Defender for Endpoint-Intune connection is enabled so that device
             compliance and security signals are shared between the two services.
         ADDEDCOMPONENT
         IMPACT
@@ -49,20 +48,17 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
     if ($TestResult -eq $false) { return $true }
 
     # 2. Get current state from Defender for Endpoint API
-    # Requires WindowsDefenderATP permission on the CIPP app registration
-    # and Microsoft Defender for Endpoint Plan 1 or Plan 2 on the tenant
     try {
         $DefenderFeatures = New-GraphGetRequest `
             -Uri 'https://api.securitycenter.microsoft.com/api/advancedfeatures' `
             -tenantid $Tenant `
             -scope 'https://api.securitycenter.microsoft.com/.default' `
-            -AsApp $true `
-            -noAuth $false
+            -AsApp $true
 
         $IntuneFeature = $DefenderFeatures | Where-Object { $_.name -eq 'MicrosoftIntuneConnection' }
 
         if ($null -eq $IntuneFeature) {
-            Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "DefenderIntuneConnection: MicrosoftIntuneConnection feature not found in response. Tenant may not have Defender for Endpoint." -Sev Warning
+            Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "DefenderIntuneConnection: MicrosoftIntuneConnection feature not found. Tenant may not have Defender for Endpoint." -Sev Warning
             return
         }
 
@@ -70,7 +66,12 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
     }
     catch {
         $ErrorMessage = Get-CippException -Exception $_
-        Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "Could not get DefenderIntuneConnection state for $Tenant. Error: $($ErrorMessage.NormalizedError)" -Sev Error -LogData $ErrorMessage
+        # 404 = tenant does not have Defender for Endpoint - skip silently with a warning
+        if ($ErrorMessage.NormalizedError -like '*404*' -or $ErrorMessage.NormalizedError -like '*Not Found*') {
+            Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "DefenderIntuneConnection: Tenant $Tenant does not have Defender for Endpoint. Skipping." -Sev Warning
+        } else {
+            Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "Could not get DefenderIntuneConnection state for $Tenant. Error: $($ErrorMessage.NormalizedError)" -Sev Error -LogData $ErrorMessage
+        }
         return
     }
 
@@ -81,8 +82,7 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
     if ($Settings.remediate -eq $true) {
         if ($IntuneConnectionEnabled -eq $true) {
             Write-LogMessage -API 'Standards' -tenant $Tenant -message 'Defender Intune connection is already enabled.' -sev Info
-        }
-        else {
+        } else {
             try {
                 $body = [PSCustomObject]@{
                     name    = 'MicrosoftIntuneConnection'
@@ -111,8 +111,7 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
     if ($Settings.alert -eq $true) {
         if ($IntuneConnectionEnabled -eq $true) {
             Write-LogMessage -API 'Standards' -tenant $Tenant -message 'Defender Intune connection is enabled.' -sev Info
-        }
-        else {
+        } else {
             Write-StandardsAlert -message 'Defender Intune connection is not enabled.' -object $CurrentValue -tenant $Tenant -standardName 'DefenderIntuneConnection' -standardId $Settings.standardId
             Write-LogMessage -API 'Standards' -tenant $Tenant -message 'Defender Intune connection is not enabled.' -sev Info
         }
