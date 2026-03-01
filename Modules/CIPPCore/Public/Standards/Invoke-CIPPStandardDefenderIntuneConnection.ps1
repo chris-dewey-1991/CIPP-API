@@ -7,8 +7,9 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
     .SYNOPSIS
         (Label) Ensure Microsoft Defender Intune connection is enabled
     .DESCRIPTION
-        (Helptext) Ensures that the Microsoft Defender–Intune connection is enabled for the tenant.
-        This allows Defender for Endpoint to integrate with Microsoft Intune for device compliance signals.
+        (Helptext) Ensures that the Microsoft Defender for Endpoint–Intune connection is enabled for the tenant.
+        Requires Microsoft Defender for Endpoint Plan 1 or Plan 2 and the WindowsDefenderATP API permission
+        on the CIPP app registration.
 
         (DocsDescription) Enables the Microsoft Intune connection toggle in Defender for Endpoint
         (Settings > Endpoints > General > Advanced features > Microsoft Intune connection).
@@ -47,20 +48,22 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
     )
     if ($TestResult -eq $false) { return $true }
 
-    # 2. Get current state from Defender Security Center API
-    # Uses the Defender scope, not the default Graph scope
+    # 2. Get current state from Defender for Endpoint API
+    # Requires WindowsDefenderATP permission on the CIPP app registration
+    # and Microsoft Defender for Endpoint Plan 1 or Plan 2 on the tenant
     try {
-        $CurrentInfo = New-GraphGetRequest `
+        $DefenderFeatures = New-GraphGetRequest `
             -Uri 'https://api.securitycenter.microsoft.com/api/advancedfeatures' `
             -tenantid $Tenant `
             -scope 'https://api.securitycenter.microsoft.com/.default' `
-            -AsApp $true
+            -AsApp $true `
+            -noAuth $false
 
-        # Response is an array of features e.g. { name: "MicrosoftIntuneConnection", enabled: true }
-        $IntuneFeature = $CurrentInfo | Where-Object { $_.name -eq 'MicrosoftIntuneConnection' }
+        $IntuneFeature = $DefenderFeatures | Where-Object { $_.name -eq 'MicrosoftIntuneConnection' }
 
-        if (-not $IntuneFeature) {
-            throw "MicrosoftIntuneConnection feature not found in Defender advanced features response."
+        if ($null -eq $IntuneFeature) {
+            Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "DefenderIntuneConnection: MicrosoftIntuneConnection feature not found in response. Tenant may not have Defender for Endpoint." -Sev Warning
+            return
         }
 
         $IntuneConnectionEnabled = [bool]$IntuneFeature.enabled
@@ -81,7 +84,11 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
         }
         else {
             try {
-                $body = '{"name":"MicrosoftIntuneConnection","enabled":true}'
+                $body = [PSCustomObject]@{
+                    name    = 'MicrosoftIntuneConnection'
+                    enabled = $true
+                } | ConvertTo-Json -Compress
+
                 New-GraphPostRequest `
                     -tenantid $Tenant `
                     -Uri 'https://api.securitycenter.microsoft.com/api/advancedfeatures' `
@@ -89,6 +96,7 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
                     -Type POST `
                     -Body $body `
                     -AsApp $true
+
                 Write-LogMessage -API 'Standards' -tenant $Tenant -message 'Enabled Defender Intune connection.' -sev Info
                 $IntuneConnectionEnabled = $true
             }
