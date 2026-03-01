@@ -37,7 +37,7 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
     #>
     param ($Tenant, $Settings)
 
-    # 1. License check – Defender for Endpoint requires at least one of these
+    # 1. License check
     $TestResult = Test-CIPPStandardLicense -StandardName 'DefenderIntuneConnection' -TenantFilter $Tenant -RequiredCapabilities @(
         'EXCHANGE_S_STANDARD',
         'EXCHANGE_S_ENTERPRISE',
@@ -47,9 +47,23 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
     )
     if ($TestResult -eq $false) { return $true }
 
-    # 2. Get current state from Defender advanced features via Graph
+    # 2. Get current state from Defender Security Center API
+    # Uses the Defender scope, not the default Graph scope
     try {
-        $CurrentInfo = New-GraphGetRequest -Uri 'https://graph.microsoft.com/beta/security/endpointSecurity/settings/advancedFeatures' -tenantid $Tenant -AsApp $true
+        $CurrentInfo = New-GraphGetRequest `
+            -Uri 'https://api.securitycenter.microsoft.com/api/advancedfeatures' `
+            -tenantid $Tenant `
+            -scope 'https://api.securitycenter.microsoft.com/.default' `
+            -AsApp $true
+
+        # Response is an array of features e.g. { name: "MicrosoftIntuneConnection", enabled: true }
+        $IntuneFeature = $CurrentInfo | Where-Object { $_.name -eq 'MicrosoftIntuneConnection' }
+
+        if (-not $IntuneFeature) {
+            throw "MicrosoftIntuneConnection feature not found in Defender advanced features response."
+        }
+
+        $IntuneConnectionEnabled = [bool]$IntuneFeature.enabled
     }
     catch {
         $ErrorMessage = Get-CippException -Exception $_
@@ -57,11 +71,8 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
         return
     }
 
-    # The property returned is microsoftIntuneConnection (bool)
-    $IntuneConnectionEnabled = [bool]$CurrentInfo.microsoftIntuneConnection
-
-    $CurrentValue  = [PSCustomObject]@{ microsoftIntuneConnection = $IntuneConnectionEnabled }
-    $ExpectedValue = [PSCustomObject]@{ microsoftIntuneConnection = $true }
+    $CurrentValue  = [PSCustomObject]@{ MicrosoftIntuneConnection = $IntuneConnectionEnabled }
+    $ExpectedValue = [PSCustomObject]@{ MicrosoftIntuneConnection = $true }
 
     # 3. Remediation
     if ($Settings.remediate -eq $true) {
@@ -70,8 +81,14 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
         }
         else {
             try {
-                $body = '{"microsoftIntuneConnection": true}'
-                New-GraphPostRequest -tenantid $Tenant -Uri 'https://graph.microsoft.com/beta/security/endpointSecurity/settings/advancedFeatures' -Type patch -Body $body -AsApp $true
+                $body = '{"name":"MicrosoftIntuneConnection","enabled":true}'
+                New-GraphPostRequest `
+                    -tenantid $Tenant `
+                    -Uri 'https://api.securitycenter.microsoft.com/api/advancedfeatures' `
+                    -scope 'https://api.securitycenter.microsoft.com/.default' `
+                    -Type POST `
+                    -Body $body `
+                    -AsApp $true
                 Write-LogMessage -API 'Standards' -tenant $Tenant -message 'Enabled Defender Intune connection.' -sev Info
                 $IntuneConnectionEnabled = $true
             }
