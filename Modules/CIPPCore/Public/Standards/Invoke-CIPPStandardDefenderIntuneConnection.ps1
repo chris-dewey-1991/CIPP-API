@@ -8,10 +8,12 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
         (Label) Ensure Microsoft Defender Intune connection is enabled
     .DESCRIPTION
         (Helptext) Ensures that the Microsoft Defender for Endpoint-Intune connection is enabled for the tenant.
-        Requires Microsoft Defender for Endpoint Plan 1 or Plan 2. Tenants without MDE will be skipped silently.
+        Requires Microsoft Defender for Endpoint Plan 1 or Plan 2. Tenants with only Defender for Business
+        (Microsoft 365 Business Premium) will be skipped as the API is not available for those tenants.
 
         (DocsDescription) Enables the Microsoft Intune connection toggle in Defender for Endpoint
         (Settings > Endpoints > General > Advanced features > Microsoft Intune connection).
+        Only applies to tenants with Defender for Endpoint Plan 1 or Plan 2.
 
     .NOTES
         CAT
@@ -47,7 +49,10 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
     )
     if ($TestResult -eq $false) { return $true }
 
-    # 2. Get current state from Defender for Endpoint API
+    # 2. Get current state from Defender for Endpoint advanced features API
+    # NOTE: Only works on tenants with MDE Plan 1 or Plan 2.
+    # Tenants with only Defender for Business (M365 Business Premium) will get a 404
+    # as that API endpoint does not exist for Defender for Business.
     try {
         $DefenderFeatures = New-GraphGetRequest `
             -Uri 'https://api.securitycenter.microsoft.com/api/advancedfeatures' `
@@ -58,7 +63,7 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
         $IntuneFeature = $DefenderFeatures | Where-Object { $_.name -eq 'MicrosoftIntuneConnection' }
 
         if ($null -eq $IntuneFeature) {
-            Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "DefenderIntuneConnection: MicrosoftIntuneConnection feature not found. Tenant may not have Defender for Endpoint." -Sev Warning
+            Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "DefenderIntuneConnection: MicrosoftIntuneConnection feature not found in response." -Sev Warning
             return
         }
 
@@ -66,9 +71,9 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
     }
     catch {
         $ErrorMessage = Get-CippException -Exception $_
-        # 404 = tenant does not have Defender for Endpoint - skip silently with a warning
+        # 404 = tenant has Defender for Business only, not MDE Plan 1/2 - skip silently
         if ($ErrorMessage.NormalizedError -like '*404*' -or $ErrorMessage.NormalizedError -like '*Not Found*') {
-            Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "DefenderIntuneConnection: Tenant $Tenant does not have Defender for Endpoint. Skipping." -Sev Warning
+            Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "DefenderIntuneConnection: Skipping $Tenant - Defender for Endpoint Plan 1/2 API not available (tenant may only have Defender for Business)." -Sev Info
         } else {
             Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "Could not get DefenderIntuneConnection state for $Tenant. Error: $($ErrorMessage.NormalizedError)" -Sev Error -LogData $ErrorMessage
         }
