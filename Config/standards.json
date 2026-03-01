@@ -5079,5 +5079,20 @@
     "addedDate": "2025-06-19",
     "powershellEquivalent": "Set-User -Identity $user -RemotePowerShellEnabled $false",
     "recommendedBy": ["CIS", "CIPP"]
-  }
+  },
+  {
+  "name": "standards.DefenderIntuneConnection",
+  "cat": "Intune Standards",
+  "tag": [],
+  "helpText": "Ensures the Microsoft Defender–Intune connection for the tenant is enabled. Remediation is controlled only by the global standards toggle.",
+  "docsDescription": "This standard checks and optionally enforces that Microsoft Defender is connected to Microsoft Intune for the tenant. There are no per‑standard options; the global 'Automatically remediate or deploy when drift is detected' toggle controls enforcement.",
+  "executiveText": "Keeps the Defender–Intune integration enabled so device management and security signals remain integrated.",
+  "addedComponent": [],
+  "label": "Enable Microsoft Defender Intune Connection State",
+  "impact": "Low Impact",
+  "impactColour": "info",
+  "addedDate": "2026-03-01",
+  "powershellEquivalent": "Invoke-CIPPStandardDefenderIntuneConnection",
+  "recommendedBy": []
+}
 ]
