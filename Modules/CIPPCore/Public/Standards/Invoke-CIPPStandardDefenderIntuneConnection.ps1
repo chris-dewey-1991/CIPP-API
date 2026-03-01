@@ -5,28 +5,31 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
     .COMPONENT
         (APIName) DefenderIntuneConnection
     .SYNOPSIS
-        (Label) Ensure Microsoft Defender Intune connection state
+        (Label) Ensure Microsoft Defender Intune connection is enabled
     .DESCRIPTION
-        (Helptext) Ensures that the Microsoft Defender Intune connection for the tenant is enabled or disabled
-        according to the selected value.
+        (Helptext) Ensures that the Microsoft Defender–Intune connection is enabled for the tenant.
+        This allows Defender for Endpoint to integrate with Microsoft Intune for device compliance signals.
 
-        (DocsDescription) This standard checks and optionally enforces the Microsoft Defender Intune connection
-        state for the tenant (for example, whether Defender is properly connected to Intune).
+        (DocsDescription) Enables the Microsoft Intune connection toggle in Defender for Endpoint
+        (Settings > Endpoints > General > Advanced features > Microsoft Intune connection).
 
     .NOTES
         CAT
             Intune Standards
         TAG
-            Intune Standards
-
+            "CIS"
+        EXECUTIVETEXT
+            Ensures the Microsoft Defender for Endpoint–Intune connection is enabled so that device
+            compliance and security signals are shared between the two services.
+        ADDEDCOMPONENT
         IMPACT
             Low Impact
         ADDEDDATE
             2026-03-01
         POWERSHELLEQUIVALENT
-            # TODO: document your underlying Get/Set Defender-Intune connection implementation
+            Invoke-CIPPStandardDefenderIntuneConnection
         RECOMMENDEDBY
-            YOURNAME
+            "CIPP"
         UPDATECOMMENTBLOCK
             Run the Tools\Update-StandardsComments.ps1 script to update this comment block
     .LINK
@@ -34,7 +37,7 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
     #>
     param ($Tenant, $Settings)
 
-    # License check
+    # 1. License check – Defender for Endpoint requires at least one of these
     $TestResult = Test-CIPPStandardLicense -StandardName 'DefenderIntuneConnection' -TenantFilter $Tenant -RequiredCapabilities @(
         'EXCHANGE_S_STANDARD',
         'EXCHANGE_S_ENTERPRISE',
@@ -42,68 +45,57 @@ function Invoke-CIPPStandardDefenderIntuneConnection {
         'EXCHANGE_S_ENTERPRISE_GOV',
         'EXCHANGE_LITE'
     )
-    if ($TestResult -eq $false) {
-        return $true
-    }
+    if ($TestResult -eq $false) { return $true }
 
-    # No per-standard field – we just always want Enabled
-    $DesiredState = 'Enabled'
-
-    # Framework still passes these based on the global toggle and standard config
-    $DoRemediate = $Settings.remediate -eq $true
-    $DoAlert     = $Settings.alert -eq $true
-    $DoReport    = $Settings.report -eq $true
-
-    # Get current state (placeholder – replace with real check)
+    # 2. Get current state from Defender advanced features via Graph
     try {
-        # TODO: implement real logic, e.g.:
-        # $CurrentState = Get-CIPPDefenderIntuneConnectionState -Tenant $Tenant  # "Enabled"/"Disabled"
-        $CurrentState = 'Disabled'  # placeholder
+        $CurrentInfo = New-GraphGetRequest -Uri 'https://graph.microsoft.com/beta/security/endpointSecurity/settings/advancedFeatures' -tenantid $Tenant -AsApp $true
     }
     catch {
-        $ErrorMessage = Get-NormalizedError -Message $_.Exception.Message
-        Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "Could not get DefenderIntuneConnection state for $Tenant. Error: $ErrorMessage" -Sev Error
+        $ErrorMessage = Get-CippException -Exception $_
+        Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "Could not get DefenderIntuneConnection state for $Tenant. Error: $($ErrorMessage.NormalizedError)" -Sev Error -LogData $ErrorMessage
         return
     }
 
-    # Remediation
-    if ($DoRemediate) {
-        if ($CurrentState -ne $DesiredState) {
-            try {
-                # TODO: implement real remediation, e.g.:
-                # if ($DesiredState -eq 'Enabled') {
-                #     Enable-CIPPDefenderIntuneConnection -Tenant $Tenant
-                # }
+    # The property returned is microsoftIntuneConnection (bool)
+    $IntuneConnectionEnabled = [bool]$CurrentInfo.microsoftIntuneConnection
 
-                Write-LogMessage -API 'Standards' -Tenant $Tenant -message "Set DefenderIntuneConnection to $DesiredState" -sev Info
+    $CurrentValue  = [PSCustomObject]@{ microsoftIntuneConnection = $IntuneConnectionEnabled }
+    $ExpectedValue = [PSCustomObject]@{ microsoftIntuneConnection = $true }
+
+    # 3. Remediation
+    if ($Settings.remediate -eq $true) {
+        if ($IntuneConnectionEnabled -eq $true) {
+            Write-LogMessage -API 'Standards' -tenant $Tenant -message 'Defender Intune connection is already enabled.' -sev Info
+        }
+        else {
+            try {
+                $body = '{"microsoftIntuneConnection": true}'
+                New-GraphPostRequest -tenantid $Tenant -Uri 'https://graph.microsoft.com/beta/security/endpointSecurity/settings/advancedFeatures' -Type patch -Body $body -AsApp $true
+                Write-LogMessage -API 'Standards' -tenant $Tenant -message 'Enabled Defender Intune connection.' -sev Info
+                $IntuneConnectionEnabled = $true
             }
             catch {
                 $ErrorMessage = Get-CippException -Exception $_
-                Write-LogMessage -API 'Standards' -tenant $Tenant -message "Failed to set DefenderIntuneConnection. Error: $($ErrorMessage.NormalizedError)" -Sev Error -LogData $ErrorMessage
+                Write-LogMessage -API 'Standards' -tenant $Tenant -message "Failed to enable Defender Intune connection. Error: $($ErrorMessage.NormalizedError)" -sev Error -LogData $ErrorMessage
             }
         }
+    }
+
+    # 4. Alerting
+    if ($Settings.alert -eq $true) {
+        if ($IntuneConnectionEnabled -eq $true) {
+            Write-LogMessage -API 'Standards' -tenant $Tenant -message 'Defender Intune connection is enabled.' -sev Info
+        }
         else {
-            Write-LogMessage -API 'Standards' -Tenant $Tenant -message "DefenderIntuneConnection already in desired state ($DesiredState)" -sev Info
+            Write-StandardsAlert -message 'Defender Intune connection is not enabled.' -object $CurrentValue -tenant $Tenant -standardName 'DefenderIntuneConnection' -standardId $Settings.standardId
+            Write-LogMessage -API 'Standards' -tenant $Tenant -message 'Defender Intune connection is not enabled.' -sev Info
         }
     }
 
-    # Alerting
-    if ($DoAlert) {
-        if ($CurrentState -ne $DesiredState) {
-            Write-StandardsAlert -message "DefenderIntuneConnection is not $DesiredState" -object $CurrentState -tenant $Tenant -standardName 'DefenderIntuneConnection' -standardId $Settings.standardId
-            Write-LogMessage -API 'Standards' -Tenant $Tenant -message "DefenderIntuneConnection is not $DesiredState" -sev Info
-        }
-        else {
-            Write-LogMessage -API 'Standards' -Tenant $Tenant -message "DefenderIntuneConnection is $DesiredState" -sev Info
-        }
-    }
-
-    # Reporting
-    if ($DoReport) {
-        $CurrentValue  = @{ DefenderIntuneConnection = $CurrentState }
-        $ExpectedValue = @{ DefenderIntuneConnection = $DesiredState }
-
+    # 5. Reporting
+    if ($Settings.report -eq $true) {
         Set-CIPPStandardsCompareField -FieldName 'standards.DefenderIntuneConnection' -CurrentValue $CurrentValue -ExpectedValue $ExpectedValue -TenantFilter $Tenant
-        Add-CIPPBPAField -FieldName 'DefenderIntuneConnectionSet' -FieldValue ([string]$CurrentState) -StoreAs string -Tenant $Tenant
+        Add-CIPPBPAField -FieldName 'DefenderIntuneConnection' -FieldValue $IntuneConnectionEnabled -StoreAs bool -Tenant $Tenant
     }
 }
