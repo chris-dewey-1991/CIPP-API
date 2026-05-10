@@ -48,7 +48,13 @@ function Invoke-CIPPStandardOMEBranding {
     }
 
     try {
-        $CurrentState = New-ExoRequest -tenantid $Tenant -cmdlet 'Get-OMEConfiguration' -cmdParams @{ Identity = 'OME Configuration' }
+        $AllOMEConfigs = New-ExoRequest -tenantid $Tenant -cmdlet 'Get-OMEConfiguration'
+        $CurrentState = $AllOMEConfigs | Where-Object { $_.IsDefault -eq $true } | Select-Object -First 1
+        if (-not $CurrentState) { $CurrentState = $AllOMEConfigs | Select-Object -First 1 }
+        if (-not $CurrentState) {
+            Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "No OME configuration found for $Tenant. The tenant may not have OME enabled." -Sev Warning
+            return
+        }
     } catch {
         $ErrorMessage = Get-CippException -Exception $_
         Write-LogMessage -API 'Standards' -Tenant $Tenant -Message "Could not get encrypted message branding (OME) configuration for $Tenant. Error: $($ErrorMessage.NormalizedError)" -Sev Error -LogData $ErrorMessage
