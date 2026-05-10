@@ -106,7 +106,7 @@ function Invoke-CIPPStandardOMEBranding {
             Write-LogMessage -API 'Standards' -tenant $Tenant -message 'Encrypted message branding (OME) is already configured correctly.' -sev Info
         } else {
             try {
-                New-ExoRequest -tenantid $Tenant -cmdlet 'Set-OMEConfiguration' -cmdParams $SetParams -useSystemMailbox $true
+                New-ExoRequest -tenantid $Tenant -cmdlet 'Set-OMEConfiguration' -cmdParams $SetParams
                 Write-LogMessage -API 'Standards' -tenant $Tenant -message 'Applied encrypted message branding (OME) configuration.' -sev Info
             } catch {
                 $ErrorMessage = Get-CippException -Exception $_
