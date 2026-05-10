@@ -121,4 +121,73 @@ function Invoke-CIPPStandardTenantAllowBlockListTemplate {
             }
         }
     }
+
+    if ($Settings.alert -eq $true -or $Settings.report -eq $true) {
+        $AllCompliant = $true
+        $ComplianceDetails = [System.Collections.Generic.List[object]]::new()
+        # Cache fetched list types to avoid redundant EXO calls when multiple templates share a list type
+        $FetchedListTypes = [System.Collections.Generic.Dictionary[string, System.Collections.Generic.HashSet[string]]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+        foreach ($TemplateData in $ResolvedTemplates) {
+            $Entries = @($TemplateData.entries -split '[,;]' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
+            $ListType = [string]$TemplateData.listType
+
+            try {
+                if (-not $FetchedListTypes.ContainsKey($ListType)) {
+                    $ExistingItems = New-ExoRequest -tenantid $Tenant -cmdlet 'Get-TenantAllowBlockListItems' -cmdParams @{ ListType = $ListType }
+                    $ExistingValues = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+                    foreach ($Item in @($ExistingItems)) { [void]$ExistingValues.Add($Item.Value) }
+                    $FetchedListTypes[$ListType] = $ExistingValues
+                }
+
+                $MissingEntries = @($Entries | Where-Object { -not $FetchedListTypes[$ListType].Contains($_) })
+                $TemplateCompliant = ($MissingEntries.Count -eq 0)
+                if (-not $TemplateCompliant) { $AllCompliant = $false }
+
+                $ComplianceDetails.Add([PSCustomObject]@{
+                    TemplateName    = [string]$TemplateData.templateName
+                    ListType        = $ListType
+                    Compliant       = $TemplateCompliant
+                    MissingEntries  = ($MissingEntries -join ', ')
+                    ExpectedEntries = ($Entries -join ', ')
+                })
+            } catch {
+                $ErrorMessage = Get-NormalizedError -Message $_.Exception.Message
+                Write-LogMessage -API 'Standards' -tenant $Tenant -message "TenantAllowBlockListTemplate: Failed to check compliance for '$($TemplateData.templateName)'. Error: $ErrorMessage" -sev Error
+                $AllCompliant = $false
+                $ComplianceDetails.Add([PSCustomObject]@{
+                    TemplateName    = [string]$TemplateData.templateName
+                    ListType        = $ListType
+                    Compliant       = $false
+                    MissingEntries  = 'Error checking entries'
+                    ExpectedEntries = ($Entries -join ', ')
+                })
+            }
+        }
+
+        if ($Settings.alert -eq $true) {
+            if ($AllCompliant) {
+                Write-LogMessage -API 'Standards' -tenant $Tenant -message 'All Tenant Allow/Block List template entries are present.' -sev Info
+            } else {
+                $NonCompliant = @($ComplianceDetails | Where-Object { -not $_.Compliant })
+                $AlertMsg = ($NonCompliant | ForEach-Object { "$($_.TemplateName) ($($_.ListType)): missing $($_.MissingEntries)" }) -join '; '
+                Write-StandardsAlert -message "Tenant Allow/Block List template entries are missing: $AlertMsg" -object $ComplianceDetails -tenant $Tenant -standardName 'TenantAllowBlockListTemplate' -standardId $Settings.standardId
+                Write-LogMessage -API 'Standards' -tenant $Tenant -message 'Tenant Allow/Block List template entries are missing.' -sev Info
+            }
+        }
+
+        if ($Settings.report -eq $true) {
+            $NonCompliantSummary = ($ComplianceDetails | Where-Object { -not $_.Compliant } | ForEach-Object { "$($_.TemplateName) ($($_.ListType)): $($_.MissingEntries)" }) -join '; '
+            $CurrentValue = [PSCustomObject]@{
+                AllEntriesPresent     = $AllCompliant
+                NonCompliantTemplates = $NonCompliantSummary
+            }
+            $ExpectedValue = [PSCustomObject]@{
+                AllEntriesPresent     = $true
+                NonCompliantTemplates = ''
+            }
+            Add-CIPPBPAField -FieldName 'TenantAllowBlockListTemplate' -FieldValue $AllCompliant -StoreAs bool -Tenant $Tenant
+            Set-CIPPStandardsCompareField -FieldName 'standards.TenantAllowBlockListTemplate' -CurrentValue $CurrentValue -ExpectedValue $ExpectedValue -TenantFilter $Tenant
+        }
+    }
 }
